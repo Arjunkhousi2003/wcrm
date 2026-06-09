@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import type { Conversation, Message, Contact, ConversationStatus } from "@/types";
 import { useRealtime } from "@/hooks/use-realtime";
+import { useAuth } from "@/hooks/use-auth";
 import { ConversationList } from "@/components/inbox/conversation-list";
 import { MessageThread } from "@/components/inbox/message-thread";
 import { ContactSidebar } from "@/components/inbox/contact-sidebar";
@@ -12,9 +13,14 @@ import { toast } from "sonner";
 import { WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+/** Poll interval when the inbox tab is open — safety net if realtime
+ *  misses an event (WS throttle, reconnect gap, RLS race on subscribe). */
+const INBOX_POLL_MS = 20_000;
+
 export default function InboxPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { user, loading: authLoading } = useAuth();
   /**
    * `?c=<id>` deep-link support. Used when landing here from the
    * dashboard's recent-conversations list so the right thread opens
@@ -121,30 +127,48 @@ export default function InboxPage() {
     }
   }, []);
 
-  // Check WhatsApp connection status on mount
+  // Verify WhatsApp health via the API — decrypts the stored token and
+  // pings Meta, so a stale `status: connected` row can't hide a broken
+  // integration.
   useEffect(() => {
-    const checkConnection = async () => {
-      const supabase = createClient();
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      const user = session?.user;
+    if (authLoading || !user) return;
 
-      if (!user) return;
+    let cancelled = false;
 
-      // Table is `whatsapp_config` (singular) — the previous "whatsapp_configs"
-      // query always returned no rows, so the banner always showed "not connected".
-      const { data } = await supabase
-        .from("whatsapp_config")
-        .select("status")
-        .eq("user_id", user.id)
-        .maybeSingle();
+    (async () => {
+      try {
+        const res = await fetch("/api/whatsapp/config", { method: "GET" });
+        const payload = await res.json();
+        if (!cancelled) {
+          setWhatsappConnected(!!payload.connected);
+        }
+      } catch {
+        if (!cancelled) setWhatsappConnected(false);
+      }
+    })();
 
-      setWhatsappConnected(data?.status === "connected");
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading, user]);
+
+  /**
+   * Background poll while the inbox is open. Realtime is best-effort;
+   * this catches webhook-delivered rows that landed while the channel
+   * was disconnected or before auth finished hydrating the JWT.
+   */
+  useEffect(() => {
+    if (authLoading || !user) return;
+
+    const tick = () => {
+      if (document.visibilityState === "visible") {
+        setResyncToken((n) => n + 1);
+      }
     };
 
-    checkConnection();
-  }, []);
+    const interval = setInterval(tick, INBOX_POLL_MS);
+    return () => clearInterval(interval);
+  }, [authLoading, user]);
 
   // Handle realtime message events
   const handleMessageEvent = useCallback(
@@ -279,7 +303,9 @@ export default function InboxPage() {
     channelName: "inbox-realtime",
     onMessageEvent: handleMessageEvent,
     onConversationEvent: handleConversationEvent,
-    enabled: true,
+    // Wait for auth before subscribing — an anon realtime channel
+    // passes RLS and receives zero postgres_changes events.
+    enabled: !authLoading && !!user,
   });
 
   /**
@@ -524,6 +550,7 @@ export default function InboxPage() {
             conversations={conversations}
             onConversationsLoaded={handleConversationsLoaded}
             resyncToken={resyncToken}
+            whatsappConnected={whatsappConnected}
           />
         </div>
 

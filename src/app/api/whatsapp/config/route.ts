@@ -96,7 +96,16 @@ export async function GET() {
         phoneNumberId: config.phone_number_id,
         accessToken,
       })
-      return NextResponse.json({ connected: true, phone_info: phoneInfo })
+      const siteUrl =
+        process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '') ||
+        'https://wacrm.tech'
+      return NextResponse.json({
+        connected: true,
+        phone_info: phoneInfo,
+        phone_number_id: config.phone_number_id,
+        webhook_url: `${siteUrl}/api/whatsapp/webhook`,
+        webhook_ready: !!process.env.META_APP_SECRET,
+      })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown Meta API error'
       console.error('[whatsapp/config GET] Meta API verification failed:', message)

@@ -4,7 +4,8 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import type { Conversation, ConversationStatus } from "@/types";
-import { Search, ChevronDown } from "lucide-react";
+import Link from "next/link";
+import { Search, ChevronDown, MessageSquare } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { Input } from "@/components/ui/input";
 import {
@@ -28,6 +29,8 @@ interface ConversationListProps {
    * or the tab was throttled. Optional so existing callers keep working.
    */
   resyncToken?: number;
+  /** When false, show setup hints in the empty state. null = still loading. */
+  whatsappConnected?: boolean | null;
 }
 
 const STATUS_COLORS: Record<ConversationStatus, string> = {
@@ -49,6 +52,7 @@ export function ConversationList({
   conversations,
   onConversationsLoaded,
   resyncToken = 0,
+  whatsappConnected = null,
 }: ConversationListProps) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<ConversationStatus | "all">("all");
@@ -79,7 +83,7 @@ export function ConversationList({
       const { data, error } = await supabase
         .from("conversations")
         .select("*, contact:contacts(*)")
-        .order("last_message_at", { ascending: false });
+        .order("last_message_at", { ascending: false, nullsFirst: false });
 
       if (cancelled) return;
 
@@ -194,8 +198,42 @@ export function ConversationList({
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
           </div>
         ) : filtered.length === 0 ? (
-          <div className="px-4 py-12 text-center">
-            <p className="text-sm text-slate-500">No conversations found</p>
+          <div className="px-4 py-10 text-center">
+            <MessageSquare className="mx-auto mb-3 h-8 w-8 text-slate-600" />
+            <p className="text-sm font-medium text-slate-300">
+              {search.trim() || filter !== "all"
+                ? "No conversations match your filter"
+                : "No conversations yet"}
+            </p>
+            {!search.trim() && filter === "all" && (
+              <div className="mt-3 space-y-2 text-xs text-slate-500">
+                {whatsappConnected === false ? (
+                  <>
+                    <p>WhatsApp is not connected or credentials are invalid.</p>
+                    <Link
+                      href="/settings"
+                      className="text-primary hover:text-primary/80"
+                    >
+                      Connect in Settings →
+                    </Link>
+                  </>
+                ) : whatsappConnected === true ? (
+                  <>
+                    <p>
+                      Send a test message to your WhatsApp Business number
+                      from a customer phone. Chats appear here when Meta
+                      delivers the webhook.
+                    </p>
+                    <p className="text-slate-600">
+                      In dev mode, only numbers added as test recipients in
+                      Meta can message you.
+                    </p>
+                  </>
+                ) : (
+                  <p>Checking WhatsApp connection…</p>
+                )}
+              </div>
+            )}
           </div>
         ) : (
           <div className="flex flex-col">

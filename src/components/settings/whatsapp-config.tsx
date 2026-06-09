@@ -47,6 +47,7 @@ export function WhatsAppConfig() {
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('unknown');
   const [resetReason, setResetReason] = useState<ResetReason>(null);
   const [statusMessage, setStatusMessage] = useState<string>('');
+  const [webhookReady, setWebhookReady] = useState<boolean | null>(null);
 
   const [phoneNumberId, setPhoneNumberId] = useState('');
   const [wabaId, setWabaId] = useState('');
@@ -99,10 +100,16 @@ export function WhatsAppConfig() {
             setConnectionStatus('connected');
             setResetReason(null);
             setStatusMessage('');
+            setWebhookReady(
+              typeof payload.webhook_ready === 'boolean'
+                ? payload.webhook_ready
+                : null,
+            );
           } else {
             setConnectionStatus('disconnected');
             setResetReason(payload.needs_reset ? 'token_corrupted' : payload.reason === 'meta_api_error' ? 'meta_api_error' : null);
             setStatusMessage(payload.message || '');
+            setWebhookReady(null);
           }
         } catch (err) {
           console.error('Health check failed:', err);
@@ -112,6 +119,7 @@ export function WhatsAppConfig() {
         setConnectionStatus('disconnected');
         setResetReason(null);
         setStatusMessage('');
+        setWebhookReady(null);
       }
     } catch (err) {
       console.error('fetchConfig error:', err);
@@ -204,6 +212,11 @@ export function WhatsAppConfig() {
         setConnectionStatus('connected');
         setResetReason(null);
         setStatusMessage('');
+        setWebhookReady(
+          typeof payload.webhook_ready === 'boolean'
+            ? payload.webhook_ready
+            : null,
+        );
         toast.success(
           payload.phone_info?.verified_name
             ? `Connected to ${payload.phone_info.verified_name}`
@@ -213,6 +226,7 @@ export function WhatsAppConfig() {
         setConnectionStatus('disconnected');
         setResetReason(payload.needs_reset ? 'token_corrupted' : payload.reason === 'meta_api_error' ? 'meta_api_error' : null);
         setStatusMessage(payload.message || '');
+        setWebhookReady(null);
         toast.error(payload.message || 'API connection failed');
       }
     } catch (err) {
@@ -308,6 +322,20 @@ export function WhatsAppConfig() {
                 </Button>
               </div>
             </div>
+          </Alert>
+        )}
+
+        {connectionStatus === 'connected' && webhookReady === false && (
+          <Alert className="bg-amber-950/40 border-amber-500/30">
+            <AlertTriangle className="size-4 text-amber-400" />
+            <AlertTitle className="text-amber-300">
+              Inbound messages will not arrive
+            </AlertTitle>
+            <AlertDescription className="text-amber-200/80">
+              <code className="text-xs">META_APP_SECRET</code> is not set in your
+              server environment. Meta webhook POSTs are rejected until you add
+              your App Secret from Meta → App Settings → Basic.
+            </AlertDescription>
           </Alert>
         )}
 

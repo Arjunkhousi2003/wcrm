@@ -199,10 +199,17 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
         }
       }
 
-      // Handle incoming messages
-      if (!value.messages || !value.contacts) continue
+      // Handle incoming messages. Meta usually includes a `contacts`
+      // array alongside `messages`, but some payload shapes (retries,
+      // certain message types) omit it — we fall back to message.from
+      // instead of dropping the whole batch.
+      if (!value.messages?.length) continue
 
-      const phoneNumberId = value.metadata.phone_number_id
+      const phoneNumberId = value.metadata?.phone_number_id
+      if (!phoneNumberId) {
+        console.error('[webhook] inbound messages missing metadata.phone_number_id')
+        continue
+      }
 
       // Find user's config by phone_number_id. `.single()` returns
       // PGRST116 for both 0 rows AND ≥2 rows — distinguish them so
@@ -241,11 +248,27 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
 
       const config = configRows[0]
 
-      const decryptedAccessToken = decrypt(config.access_token)
+      let decryptedAccessToken: string
+      try {
+        decryptedAccessToken = decrypt(config.access_token)
+      } catch (err) {
+        console.error(
+          '[webhook] Failed to decrypt access_token for user',
+          config.user_id,
+          '— inbound message dropped. Re-save WhatsApp settings with a valid ENCRYPTION_KEY.',
+          err instanceof Error ? err.message : err,
+        )
+        continue
+      }
 
       for (let i = 0; i < value.messages.length; i++) {
         const message = value.messages[i]
-        const contact = value.contacts[i] || value.contacts[0]
+        const contact =
+          value.contacts?.[i] ??
+          value.contacts?.[0] ?? {
+            profile: { name: message.from },
+            wa_id: message.from,
+          }
 
         await processMessage(
           message,
@@ -559,6 +582,20 @@ async function processMessage(
     .eq('sender_type', 'customer')
   const isFirstInboundMessage = (priorCustomerMsgCount ?? 0) === 0
 
+  // Meta retries webhooks on slow responses — skip duplicate inserts so
+  // a replay doesn't fail the whole handler or create twin rows.
+  if (message.id) {
+    const { data: existingMsg } = await supabaseAdmin()
+      .from('messages')
+      .select('id')
+      .eq('message_id', message.id)
+      .maybeSingle()
+    if (existingMsg) {
+      console.info('[webhook] duplicate message_id, skipping insert:', message.id)
+      return
+    }
+  }
+
   const { error: msgError } = await supabaseAdmin().from('messages').insert({
     conversation_id: conversation.id,
     sender_type: 'customer',
@@ -576,6 +613,11 @@ async function processMessage(
   })
 
   if (msgError) {
+    // Unique index on message_id (migration 014) — Meta replay is fine.
+    if (msgError.code === '23505') {
+      console.info('[webhook] duplicate message_id on insert, skipping:', message.id)
+      return
+    }
     console.error('Error inserting message:', msgError)
     return
   }
@@ -883,19 +925,26 @@ async function findOrCreateContact(
 }
 
 async function findOrCreateConversation(userId: string, contactId: string) {
-  // Look for existing conversation
+  // `.maybeSingle()` after `.limit(1)` — never throws PGRST116 when
+  // duplicate rows exist (pre-unique-constraint installs, race inserts).
   const { data: existing, error: findError } = await supabaseAdmin()
     .from('conversations')
     .select('*')
     .eq('user_id', userId)
     .eq('contact_id', contactId)
-    .single()
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle()
 
-  if (!findError && existing) {
+  if (findError) {
+    console.error('Error fetching conversation:', findError)
+    return null
+  }
+
+  if (existing) {
     return existing
   }
 
-  // Create new conversation
   const { data: newConv, error: createError } = await supabaseAdmin()
     .from('conversations')
     .insert({
@@ -906,6 +955,19 @@ async function findOrCreateConversation(userId: string, contactId: string) {
     .single()
 
   if (createError) {
+    // Concurrent webhook deliveries can both pass the SELECT above and
+    // race on INSERT — fetch the winner instead of dropping the message.
+    if (createError.code === '23505') {
+      const { data: raced } = await supabaseAdmin()
+        .from('conversations')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('contact_id', contactId)
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle()
+      if (raced) return raced
+    }
     console.error('Error creating conversation:', createError)
     return null
   }
