@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Contact, MessageTemplate } from '@/types';
 
@@ -19,6 +19,19 @@ export interface AudienceConfig {
   csvContacts?: { phone: string; name?: string }[];
   /** Contacts carrying any of these tags are subtracted from the result. */
   excludeTagIds?: string[];
+  /** Cap audience size — useful for test sends (10, 20, 30). */
+  contactLimit?: number;
+}
+
+export interface BroadcastSendProgress {
+  phase: 'idle' | 'preparing' | 'sending' | 'done';
+  total: number;
+  sent: number;
+  failed: number;
+  remaining: number;
+  percent: number;
+  elapsedSeconds: number;
+  estimatedRemainingSeconds: number | null;
 }
 
 /**
@@ -44,6 +57,23 @@ interface UseBroadcastSendingReturn {
   createAndSendBroadcast: (payload: BroadcastPayload) => Promise<string>;
   isProcessing: boolean;
   progress: number;
+  sendProgress: BroadcastSendProgress;
+}
+
+const IDLE_PROGRESS: BroadcastSendProgress = {
+  phase: 'idle',
+  total: 0,
+  sent: 0,
+  failed: 0,
+  remaining: 0,
+  percent: 0,
+  elapsedSeconds: 0,
+  estimatedRemainingSeconds: null,
+};
+
+function applyContactLimit(contacts: Contact[], limit?: number): Contact[] {
+  if (!limit || limit <= 0) return contacts;
+  return contacts.slice(0, limit);
 }
 
 /**
@@ -142,6 +172,38 @@ async function fetchCustomValueIndex(
 export function useBroadcastSending(): UseBroadcastSendingReturn {
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [sendProgress, setSendProgress] =
+    useState<BroadcastSendProgress>(IDLE_PROGRESS);
+  const sendStartedAtRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!isProcessing) {
+      sendStartedAtRef.current = null;
+      return;
+    }
+    const interval = setInterval(() => {
+      if (sendStartedAtRef.current) {
+        const elapsed = Math.floor(
+          (Date.now() - sendStartedAtRef.current) / 1000,
+        );
+        setSendProgress((prev) =>
+          prev.elapsedSeconds === elapsed ? prev : { ...prev, elapsedSeconds: elapsed },
+        );
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isProcessing]);
+
+  function updateSendProgress(patch: Partial<BroadcastSendProgress>) {
+    setSendProgress((prev) => {
+      const next = { ...prev, ...patch };
+      const processed = next.sent + next.failed;
+      next.remaining = Math.max(0, next.total - processed);
+      next.percent =
+        next.total > 0 ? Math.min(100, Math.round((processed / next.total) * 100)) : 0;
+      return next;
+    });
+  }
 
   async function resolveAudience(audience: AudienceConfig): Promise<Contact[]> {
     const supabase = createClient();
@@ -193,7 +255,7 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
       contacts = contacts.filter((c) => !excludedIds.has(c.id));
     }
 
-    return contacts;
+    return applyContactLimit(contacts, audience.contactLimit);
   }
 
   /**
@@ -310,6 +372,13 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
   async function createAndSendBroadcast(payload: BroadcastPayload): Promise<string> {
     setIsProcessing(true);
     setProgress(0);
+    const sendStartedAt = Date.now();
+    sendStartedAtRef.current = sendStartedAt;
+    setSendProgress({
+      ...IDLE_PROGRESS,
+      phase: 'preparing',
+      elapsedSeconds: 0,
+    });
 
     const supabase = createClient();
 
@@ -334,6 +403,8 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
       if (contacts.length === 0) {
         throw new Error('No contacts found for this audience.');
       }
+
+      updateSendProgress({ total: contacts.length, phase: 'preparing' });
 
       // ── Step 2: Create broadcast row ──────────────────────────────
       setProgress(10);
@@ -422,7 +493,15 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
       );
 
       let failedCount = 0;
+      let sentCount = 0;
       const totalRecipients = recipients.length;
+
+      updateSendProgress({
+        total: totalRecipients,
+        phase: 'sending',
+        sent: 0,
+        failed: 0,
+      });
 
       for (let i = 0; i < recipients.length; i += SEND_BATCH_SIZE) {
         const batch = recipients.slice(i, i + SEND_BATCH_SIZE);
@@ -481,6 +560,7 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
             }
 
             if (result.status === 'sent') {
+              sentCount++;
               await supabase
                 .from('broadcast_recipients')
                 .update({
@@ -518,6 +598,21 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
           30 + Math.round(((i + batch.length) / totalRecipients) * 60);
         setProgress(progressPct);
 
+        const elapsedMs = Date.now() - sendStartedAt;
+        const processed = sentCount + failedCount;
+        const rate = processed > 0 ? elapsedMs / processed : 0;
+        const estimatedRemainingSeconds =
+          rate > 0
+            ? Math.ceil(((totalRecipients - processed) * rate) / 1000)
+            : null;
+
+        updateSendProgress({
+          sent: sentCount,
+          failed: failedCount,
+          elapsedSeconds: Math.floor(elapsedMs / 1000),
+          estimatedRemainingSeconds,
+        });
+
         if (i + SEND_BATCH_SIZE < recipients.length) {
           await sleep(SEND_BATCH_DELAY_MS);
         }
@@ -534,11 +629,20 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
         .eq('id', broadcast.id);
 
       setProgress(100);
+      updateSendProgress({
+        phase: 'done',
+        sent: sentCount,
+        failed: failedCount,
+        elapsedSeconds: Math.floor((Date.now() - sendStartedAt) / 1000),
+        estimatedRemainingSeconds: 0,
+        percent: 100,
+        remaining: 0,
+      });
       return broadcast.id;
     } finally {
       setIsProcessing(false);
     }
   }
 
-  return { createAndSendBroadcast, isProcessing, progress };
+  return { createAndSendBroadcast, isProcessing, progress, sendProgress };
 }

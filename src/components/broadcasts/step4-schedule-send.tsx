@@ -14,12 +14,15 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import { ArrowLeft, Send, Loader2, Users, Save } from 'lucide-react';
+import { ArrowLeft, Send, Loader2, Users, Save, Clock } from 'lucide-react';
+import type { BroadcastSendProgress } from '@/hooks/use-broadcast-sending';
 
 interface AudienceConfig {
   type: string;
   tagIds?: string[];
   csvContacts?: { phone: string; name?: string }[];
+  contactLimit?: number;
+  customField?: { fieldId: string; value: string };
 }
 
 interface Step4Props {
@@ -32,6 +35,14 @@ interface Step4Props {
   onBack: () => void;
   isProcessing: boolean;
   progress: number;
+  sendProgress: BroadcastSendProgress;
+}
+
+function formatDuration(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`;
 }
 
 export function Step4ScheduleSend({
@@ -44,6 +55,7 @@ export function Step4ScheduleSend({
   onBack,
   isProcessing,
   progress,
+  sendProgress,
 }: Step4Props) {
   const [showConfirm, setShowConfirm] = useState(false);
   const [estimatedReach, setEstimatedReach] = useState<number>(0);
@@ -55,11 +67,14 @@ export function Step4ScheduleSend({
       try {
         const supabase = createClient();
 
+        const cap = (n: number) =>
+          audience.contactLimit ? Math.min(n, audience.contactLimit) : n;
+
         if (audience.type === 'all') {
           const { count } = await supabase
             .from('contacts')
             .select('*', { count: 'exact', head: true });
-          setEstimatedReach(count ?? 0);
+          setEstimatedReach(cap(count ?? 0));
         } else if (audience.type === 'tags' && audience.tagIds && audience.tagIds.length > 0) {
           const { data: contactTags } = await supabase
             .from('contact_tags')
@@ -67,9 +82,22 @@ export function Step4ScheduleSend({
             .in('tag_id', audience.tagIds);
 
           const uniqueIds = new Set((contactTags ?? []).map((ct) => ct.contact_id));
-          setEstimatedReach(uniqueIds.size);
+          setEstimatedReach(cap(uniqueIds.size));
         } else if (audience.type === 'csv' && audience.csvContacts) {
-          setEstimatedReach(audience.csvContacts.length);
+          setEstimatedReach(cap(audience.csvContacts.length));
+        } else if (
+          audience.type === 'custom_field' &&
+          audience.customField?.fieldId &&
+          audience.customField.value
+        ) {
+          const { fieldId, value } = audience.customField;
+          const { data } = await supabase
+            .from('contact_custom_values')
+            .select('contact_id')
+            .eq('custom_field_id', fieldId)
+            .eq('value', value);
+          const unique = new Set((data ?? []).map((r) => r.contact_id));
+          setEstimatedReach(cap(unique.size));
         } else {
           setEstimatedReach(0);
         }
@@ -142,21 +170,78 @@ export function Step4ScheduleSend({
         </div>
       </div>
 
-      {/* Processing overlay */}
+      {/* Sending progress */}
       {isProcessing && (
-        <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
-          <div className="mb-2 flex items-center justify-between">
+        <div className="rounded-xl border border-primary/20 bg-primary/5 p-5 space-y-4">
+          <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Loader2 className="h-4 w-4 animate-spin text-primary" />
-              <p className="text-sm font-medium text-white">Sending broadcast...</p>
+              <p className="text-sm font-medium text-white">
+                {sendProgress.phase === 'preparing'
+                  ? 'Preparing broadcast…'
+                  : 'Sending messages…'}
+              </p>
             </div>
-            <span className="text-xs font-medium text-primary">{progress}%</span>
+            <span className="text-sm font-semibold text-primary">
+              {sendProgress.percent}%
+            </span>
           </div>
-          <div className="h-1.5 w-full rounded-full bg-slate-800">
+
+          <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-800">
             <div
-              className="h-1.5 rounded-full bg-primary transition-all duration-300"
-              style={{ width: `${progress}%` }}
+              className="h-2.5 rounded-full bg-primary transition-all duration-500 ease-out"
+              style={{ width: `${Math.max(sendProgress.percent, progress)}%` }}
             />
+          </div>
+
+          {sendProgress.phase === 'sending' && sendProgress.total > 0 && (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div className="rounded-lg bg-slate-900/60 px-3 py-2">
+                <p className="text-xs text-slate-400">Sent</p>
+                <p className="text-lg font-semibold text-green-400">
+                  {sendProgress.sent}
+                </p>
+              </div>
+              <div className="rounded-lg bg-slate-900/60 px-3 py-2">
+                <p className="text-xs text-slate-400">Remaining</p>
+                <p className="text-lg font-semibold text-white">
+                  {sendProgress.remaining}
+                </p>
+              </div>
+              <div className="rounded-lg bg-slate-900/60 px-3 py-2">
+                <p className="text-xs text-slate-400">Failed</p>
+                <p className="text-lg font-semibold text-red-400">
+                  {sendProgress.failed}
+                </p>
+              </div>
+              <div className="rounded-lg bg-slate-900/60 px-3 py-2">
+                <p className="text-xs text-slate-400">Total</p>
+                <p className="text-lg font-semibold text-white">
+                  {sendProgress.total}
+                </p>
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-4 text-xs text-slate-400">
+            <span className="inline-flex items-center gap-1">
+              <Clock className="h-3.5 w-3.5" />
+              Elapsed: {formatDuration(sendProgress.elapsedSeconds)}
+            </span>
+            {sendProgress.estimatedRemainingSeconds !== null &&
+              sendProgress.phase === 'sending' &&
+              sendProgress.remaining > 0 && (
+                <span>
+                  Est. remaining:{' '}
+                  {formatDuration(sendProgress.estimatedRemainingSeconds)}
+                </span>
+              )}
+            {sendProgress.phase === 'sending' && sendProgress.total > 0 && (
+              <span>
+                {sendProgress.sent + sendProgress.failed} of {sendProgress.total}{' '}
+                processed
+              </span>
+            )}
           </div>
         </div>
       )}

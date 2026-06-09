@@ -1,9 +1,11 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { parseCsvContacts } from '@/lib/parse-csv-contacts';
 import { CustomField, Tag } from '@/types';
 import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
 import {
   Users,
   Tags,
@@ -13,6 +15,8 @@ import {
   ArrowRight,
   ArrowLeft,
   X,
+  FileText,
+  Trash2,
 } from 'lucide-react';
 
 type AudienceType = 'all' | 'tags' | 'custom_field' | 'csv';
@@ -30,6 +34,19 @@ interface AudienceConfig {
   customField?: CustomFieldFilter;
   csvContacts?: { phone: string; name?: string }[];
   excludeTagIds?: string[];
+  contactLimit?: number;
+}
+
+const CONTACT_LIMIT_OPTIONS: { value: string; label: string }[] = [
+  { value: '', label: 'All contacts' },
+  { value: '10', label: '10 contacts only' },
+  { value: '20', label: '20 contacts only' },
+  { value: '30', label: '30 contacts only' },
+];
+
+function applyLimit(count: number, limit?: number): number {
+  if (!limit || limit <= 0) return count;
+  return Math.min(count, limit);
 }
 
 interface Step2Props {
@@ -89,6 +106,9 @@ export function Step2SelectAudience({
   const [loadingFields, setLoadingFields] = useState(false);
   const [estimatedCount, setEstimatedCount] = useState<number | null>(null);
   const [loadingCount, setLoadingCount] = useState(false);
+  const [csvFileName, setCsvFileName] = useState<string | null>(null);
+  const [csvParsing, setCsvParsing] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Tags are used both by the primary "Filter by Tags" audience type
   // AND by the exclude-list below — so always load once on mount.
@@ -165,7 +185,9 @@ export function Step2SelectAudience({
         audience.csvContacts &&
         audience.csvContacts.length > 0
       ) {
-        setEstimatedCount(audience.csvContacts.length);
+        setEstimatedCount(
+          applyLimit(audience.csvContacts.length, audience.contactLimit),
+        );
         return;
       } else {
         // Partially-configured audience — wait for the user to finish.
@@ -187,14 +209,15 @@ export function Step2SelectAudience({
         const effective = [...baseIds].filter(
           (id) => !excludeSet?.has(id),
         );
-        setEstimatedCount(effective.length);
+        setEstimatedCount(applyLimit(effective.length, audience.contactLimit));
       } else {
         // "All" — fetch the total, then subtract exclude set if any.
         const { count } = await supabase
           .from('contacts')
           .select('*', { count: 'exact', head: true });
         const total = count ?? 0;
-        setEstimatedCount(excludeSet ? Math.max(0, total - excludeSet.size) : total);
+        const raw = excludeSet ? Math.max(0, total - excludeSet.size) : total;
+        setEstimatedCount(applyLimit(raw, audience.contactLimit));
       }
     } finally {
       setLoadingCount(false);
@@ -205,6 +228,7 @@ export function Step2SelectAudience({
     audience.customField,
     audience.csvContacts,
     audience.excludeTagIds,
+    audience.contactLimit,
   ]);
 
   useEffect(() => {
@@ -225,6 +249,45 @@ export function Step2SelectAudience({
       ? current.filter((id) => id !== tagId)
       : [...current, tagId];
     onUpdate({ ...audience, excludeTagIds: updated });
+  }
+
+  async function handleCsvFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setCsvParsing(true);
+    setCsvFileName(file.name);
+
+    try {
+      const text = await file.text();
+      const rows = parseCsvContacts(text);
+
+      if (rows.length === 0) {
+        toast.error(
+          'No valid contacts found. Use a CSV with a "phone" column (or a single phone column).',
+        );
+        setCsvFileName(null);
+        onUpdate({ ...audience, csvContacts: undefined });
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        return;
+      }
+
+      onUpdate({ ...audience, type: 'csv', csvContacts: rows });
+      toast.success(`${rows.length} contact${rows.length !== 1 ? 's' : ''} loaded from CSV`);
+    } catch {
+      toast.error('Failed to read CSV file.');
+      setCsvFileName(null);
+      onUpdate({ ...audience, csvContacts: undefined });
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    } finally {
+      setCsvParsing(false);
+    }
+  }
+
+  function clearCsv() {
+    setCsvFileName(null);
+    onUpdate({ ...audience, csvContacts: undefined });
+    if (fileInputRef.current) fileInputRef.current.value = '';
   }
 
   function updateCustomField(patch: Partial<CustomFieldFilter>) {
@@ -339,6 +402,103 @@ export function Step2SelectAudience({
         </div>
       )}
 
+      {audience.type === 'csv' && (
+        <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-900/50 p-4">
+          <p className="text-sm font-medium text-white">Upload CSV</p>
+          <p className="text-xs text-slate-400">
+            CSV must include a phone column (phone, mobile, or phone_number).
+            Optional name column supported. You can also upload a single-column
+            list of phone numbers.
+          </p>
+
+          <div
+            onClick={() => !csvParsing && fileInputRef.current?.click()}
+            className={`flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-6 transition-colors ${
+              csvParsing
+                ? 'cursor-wait border-slate-700'
+                : 'cursor-pointer border-slate-700 hover:border-primary/50'
+            }`}
+          >
+            {csvParsing ? (
+              <>
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                <p className="text-sm text-slate-400">Parsing CSV…</p>
+              </>
+            ) : csvFileName && audience.csvContacts?.length ? (
+              <>
+                <FileText className="h-8 w-8 text-primary" />
+                <p className="text-sm text-slate-300">{csvFileName}</p>
+                <p className="text-xs text-primary">
+                  {audience.csvContacts.length} contact
+                  {audience.csvContacts.length !== 1 ? 's' : ''} ready to send
+                </p>
+              </>
+            ) : (
+              <>
+                <Upload className="h-8 w-8 text-slate-500" />
+                <p className="text-sm text-slate-400">Click to select CSV file</p>
+                <p className="text-xs text-slate-500">.csv files only</p>
+              </>
+            )}
+          </div>
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            onChange={handleCsvFileChange}
+            className="hidden"
+          />
+
+          {audience.csvContacts && audience.csvContacts.length > 0 && (
+            <>
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-medium uppercase tracking-wider text-slate-400">
+                  Preview (first {Math.min(5, audience.csvContacts.length)} rows)
+                </p>
+                <button
+                  type="button"
+                  onClick={clearCsv}
+                  className="inline-flex items-center gap-1 text-xs text-red-400 hover:text-red-300"
+                >
+                  <Trash2 className="h-3 w-3" />
+                  Remove file
+                </button>
+              </div>
+              <div className="overflow-hidden rounded-lg border border-slate-700">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-slate-800">
+                      <th className="px-3 py-1.5 text-left font-medium text-slate-400">
+                        Phone
+                      </th>
+                      <th className="px-3 py-1.5 text-left font-medium text-slate-400">
+                        Name
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {audience.csvContacts.slice(0, 5).map((row, i) => (
+                      <tr key={i} className="border-t border-slate-700/50">
+                        <td className="px-3 py-1.5 text-slate-300">{row.phone}</td>
+                        <td className="px-3 py-1.5 text-slate-300">
+                          {row.name || '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {audience.csvContacts.length > 5 && (
+                <p className="text-xs text-slate-500">
+                  …and {audience.csvContacts.length - 5} more rows
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
       {audience.type === 'custom_field' && (
         <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-900/50 p-4">
           <p className="text-sm font-medium text-white">Custom Field Filter</p>
@@ -388,6 +548,32 @@ export function Step2SelectAudience({
           )}
         </div>
       )}
+
+      {/* Contact limit — applies to all audience types */}
+      <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
+        <p className="mb-2 text-sm font-medium text-white">Recipient Limit</p>
+        <p className="mb-3 text-xs text-slate-400">
+          Optionally cap how many contacts receive this broadcast (useful for
+          test sends).
+        </p>
+        <select
+          value={audience.contactLimit?.toString() ?? ''}
+          onChange={(e) => {
+            const val = e.target.value;
+            onUpdate({
+              ...audience,
+              contactLimit: val ? Number(val) : undefined,
+            });
+          }}
+          className="h-9 w-full max-w-xs rounded-lg border border-slate-700 bg-slate-800 px-2.5 text-sm text-white outline-none focus:border-primary focus:ring-1 focus:ring-primary sm:w-auto"
+        >
+          {CONTACT_LIMIT_OPTIONS.map((opt) => (
+            <option key={opt.value || 'all'} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+      </div>
 
       {/* Exclude list — applies regardless of audience type */}
       <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
