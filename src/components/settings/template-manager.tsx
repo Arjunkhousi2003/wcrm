@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { Plus, Trash2, Loader2, RefreshCw } from 'lucide-react';
+import Link from 'next/link';
+import { Plus, Trash2, Loader2, RefreshCw, AlertTriangle, ExternalLink } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { Button } from '@/components/ui/button';
@@ -10,7 +11,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   Dialog,
   DialogContent,
@@ -100,6 +102,8 @@ export function TemplateManager() {
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [form, setForm] = useState<TemplateFormData>(emptyForm);
+  const [whatsappReady, setWhatsappReady] = useState<boolean | null>(null);
+  const [wabaConfigured, setWabaConfigured] = useState<boolean | null>(null);
 
   useEffect(() => {
     if (authLoading) return;
@@ -108,8 +112,25 @@ export function TemplateManager() {
       return;
     }
     fetchTemplates(user.id);
+    fetchWhatsAppHealth();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading, user?.id]);
+
+  async function fetchWhatsAppHealth() {
+    try {
+      const res = await fetch('/api/whatsapp/config', { method: 'GET' });
+      const payload = await res.json();
+      setWhatsappReady(!!payload.connected);
+      setWabaConfigured(
+        typeof payload.waba_configured === 'boolean'
+          ? payload.waba_configured
+          : null,
+      );
+    } catch {
+      setWhatsappReady(false);
+      setWabaConfigured(null);
+    }
+  }
 
   async function fetchTemplates(userId: string) {
     try {
@@ -194,12 +215,18 @@ export function TemplateManager() {
       if (!res.ok) {
         throw new Error(data?.error || `Sync failed (HTTP ${res.status})`);
       }
-      toast.success(
-        `Synced ${data.total} template${data.total === 1 ? '' : 's'} from Meta` +
-          (data.inserted || data.updated
-            ? ` (${data.inserted} new, ${data.updated} updated)`
-            : ''),
-      );
+      if (data.total === 0) {
+        toast.warning(
+          'Synced 0 templates from Meta. Create templates in WhatsApp Manager, wait for approval, then sync again — or check that your WABA ID matches the account where templates live.',
+        );
+      } else {
+        toast.success(
+          `Synced ${data.total} template${data.total === 1 ? '' : 's'} from Meta` +
+            (data.inserted || data.updated
+              ? ` (${data.inserted} new, ${data.updated} updated)`
+              : ''),
+        );
+      }
       if (Array.isArray(data.errors) && data.errors.length > 0) {
         // Surface per-template failures so users don't trust a green
         // toast that hides silent drift.
@@ -243,6 +270,13 @@ export function TemplateManager() {
     }
   }
 
+  const approvedCount = templates.filter((t) => t.status === 'Approved').length;
+  const pendingCount = templates.filter((t) => t.status === 'Pending').length;
+  const showSetupAlert =
+    whatsappReady === false ||
+    wabaConfigured === false ||
+    (templates.length > 0 && approvedCount === 0);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -253,13 +287,64 @@ export function TemplateManager() {
 
   return (
     <div className="space-y-4 mt-4">
+      {showSetupAlert && (
+        <Alert className="border-amber-500/30 bg-amber-500/10">
+          <AlertTriangle className="size-4 text-amber-400" />
+          <AlertTitle className="text-amber-200">Template sync setup</AlertTitle>
+          <AlertDescription className="text-amber-100/80">
+            {whatsappReady === false ? (
+              <>
+                WhatsApp is not connected.{' '}
+                <Link href="/settings?tab=whatsapp" className="underline hover:text-amber-50">
+                  Connect in WhatsApp Config
+                </Link>{' '}
+                with a permanent token that includes{' '}
+                <code className="text-amber-100">whatsapp_business_management</code>.
+              </>
+            ) : wabaConfigured === false ? (
+              <>
+                WABA ID is missing.{' '}
+                <Link href="/settings?tab=whatsapp" className="underline hover:text-amber-50">
+                  Add your WhatsApp Business Account ID
+                </Link>{' '}
+                in WhatsApp Config — template sync cannot run without it.
+              </>
+            ) : (
+              <>
+                You have templates locally but none are <strong>Approved</strong> yet.
+                Create them in{' '}
+                <a
+                  href="https://business.facebook.com/wa/manage/message-templates/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-0.5 underline hover:text-amber-50"
+                >
+                  Meta WhatsApp Manager
+                  <ExternalLink className="size-3" />
+                </a>
+                , wait for approval, then click Sync from Meta.
+              </>
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
+
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="text-lg font-semibold text-white">Message Templates</h2>
           <p className="text-sm text-slate-400">
-            Create and manage your WhatsApp message templates. Meta requires
-            every template to be approved in the WhatsApp Manager before it can
-            be sent — use &quot;Sync from Meta&quot; to pull your approved list.
+            Templates are created and approved in Meta WhatsApp Manager, then
+            pulled here with Sync from Meta. Only <strong>Approved</strong>{' '}
+            templates can be sent in Inbox and Broadcasts.
+            {templates.length > 0 && (
+              <span className="mt-1 block text-xs text-slate-500">
+                {approvedCount} approved
+                {pendingCount > 0 ? ` · ${pendingCount} pending` : ''}
+                {templates.length - approvedCount - pendingCount > 0
+                  ? ` · ${templates.length - approvedCount - pendingCount} draft/rejected`
+                  : ''}
+              </span>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -290,9 +375,22 @@ export function TemplateManager() {
 
       {templates.length === 0 ? (
         <Card className="bg-slate-900 border-slate-700 ring-0 ring-transparent">
-          <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-            <p className="text-slate-400 text-sm">No templates yet.</p>
-            <p className="text-slate-500 text-xs mt-1">Create your first message template to get started.</p>
+          <CardContent className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+            <p className="text-slate-400 text-sm">No templates synced yet.</p>
+            <ol className="max-w-md text-left text-xs text-slate-500 space-y-1 list-decimal list-inside">
+              <li>Create a template in Meta WhatsApp Manager and submit for approval</li>
+              <li>Ensure WhatsApp Config has your WABA ID and a token with <code>whatsapp_business_management</code></li>
+              <li>Click <strong className="text-slate-400">Sync from Meta</strong> above</li>
+            </ol>
+            <Button
+              variant="outline"
+              onClick={handleSyncFromMeta}
+              disabled={syncing}
+              className="mt-2 border-slate-700 text-slate-300 hover:bg-slate-800"
+            >
+              <RefreshCw className={`size-4 ${syncing ? 'animate-spin' : ''}`} />
+              {syncing ? 'Syncing…' : 'Sync from Meta'}
+            </Button>
           </CardContent>
         </Card>
       ) : (
@@ -342,7 +440,9 @@ export function TemplateManager() {
           <DialogHeader>
             <DialogTitle className="text-white">New Message Template</DialogTitle>
             <DialogDescription className="text-slate-400">
-              Create a new WhatsApp message template.
+              Saves a local draft only — this does <strong>not</strong> submit
+              to Meta. For production use, create the template in WhatsApp
+              Manager and sync it here.
             </DialogDescription>
           </DialogHeader>
 

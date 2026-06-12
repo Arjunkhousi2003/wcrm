@@ -48,7 +48,7 @@ export async function GET() {
 
     const { data: config, error: configError } = await supabase
       .from('whatsapp_config')
-      .select('phone_number_id, access_token, status')
+      .select('phone_number_id, waba_id, access_token, status')
       .eq('user_id', user.id)
       .maybeSingle()
 
@@ -103,6 +103,7 @@ export async function GET() {
         connected: true,
         phone_info: phoneInfo,
         phone_number_id: config.phone_number_id,
+        waba_configured: !!config.waba_id,
         webhook_url: `${siteUrl}/api/whatsapp/webhook`,
         webhook_ready: !!process.env.META_APP_SECRET,
       })
@@ -152,6 +153,16 @@ export async function POST(request: Request) {
     if (!access_token || !phone_number_id) {
       return NextResponse.json(
         { error: 'access_token and phone_number_id are required' },
+        { status: 400 }
+      )
+    }
+
+    if (!waba_id?.trim()) {
+      return NextResponse.json(
+        {
+          error:
+            'WhatsApp Business Account ID (WABA ID) is required for template sync and broadcasts. Find it in Meta → WhatsApp → API Setup.',
+        },
         { status: 400 }
       )
     }

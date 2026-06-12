@@ -123,7 +123,20 @@ export async function POST() {
       )
     }
 
-    const accessToken = decrypt(config.access_token)
+    let accessToken: string
+    try {
+      accessToken = decrypt(config.access_token)
+    } catch (err) {
+      console.error('[templates/sync] Token decryption failed:', err)
+      return NextResponse.json(
+        {
+          error:
+            'Cannot decrypt your stored access token. ENCRYPTION_KEY may be missing or changed between environments — open Settings → WhatsApp Config, click Reset Configuration, then re-save your credentials.',
+          reason: 'token_corrupted',
+        },
+        { status: 400 },
+      )
+    }
 
     // Paginate through every template Meta has for this WABA. Meta
     // returns at most 100 per page; `paging.next` is a full URL. Cap
@@ -144,12 +157,32 @@ export async function POST() {
 
       if (!metaRes.ok) {
         let metaErr = `Meta API error: ${metaRes.status}`
+        let metaCode: number | undefined
         try {
           const body = await metaRes.json()
           if (body?.error?.message) metaErr = body.error.message
+          if (typeof body?.error?.code === 'number') metaCode = body.error.code
         } catch {
           // response wasn't JSON — keep the fallback
         }
+
+        const permissionDenied =
+          metaRes.status === 403 ||
+          metaCode === 10 ||
+          metaCode === 200 ||
+          /permission|oauth/i.test(metaErr)
+
+        if (permissionDenied) {
+          return NextResponse.json(
+            {
+              error:
+                'Meta rejected template sync — your access token needs the whatsapp_business_management permission. Generate a system-user token in Meta Business Settings with that scope, then re-save in Settings → WhatsApp Config.',
+              reason: 'missing_permission',
+            },
+            { status: 403 },
+          )
+        }
+
         return NextResponse.json({ error: metaErr }, { status: 502 })
       }
 
