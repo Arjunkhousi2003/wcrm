@@ -2,11 +2,12 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
 import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
-import { normalizePhone, phonesMatch } from '@/lib/whatsapp/phone-utils'
+import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { mirrorOutboundToInbox } from '@/lib/whatsapp/inbox-mirror'
+import { resolveInboundContact } from '@/lib/whatsapp/resolve-inbound-contact'
 
 // Lazy-initialized to avoid build-time crash when env vars are missing
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -589,10 +590,11 @@ async function processMessage(
   const contactName = contact.profile.name
 
   // Find or create contact
-  const contactOutcome = await findOrCreateContact(
+  const contactOutcome = await resolveInboundContact(
+    supabaseAdmin(),
     userId,
     senderPhone,
-    contactName
+    contactName,
   )
   if (!contactOutcome) return
   const contactRecord = contactOutcome.contact
@@ -956,65 +958,6 @@ async function parseMessageContent(
         contentText: `[Unsupported message type: ${message.type}]`,
       }
   }
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type ContactRow = any
-
-interface ContactOutcome {
-  contact: ContactRow
-  /** True when this call created the row; drives new_contact_created
-   *  automation dispatch in processMessage. */
-  wasCreated: boolean
-}
-
-async function findOrCreateContact(
-  userId: string,
-  phone: string,
-  name: string
-): Promise<ContactOutcome | null> {
-  // Look up existing contacts for this user
-  const { data: contacts, error: contactsError } = await supabaseAdmin()
-    .from('contacts')
-    .select('*')
-    .eq('user_id', userId)
-
-  if (contactsError) {
-    console.error('Error fetching contacts:', contactsError)
-    return null
-  }
-
-  // Use phonesMatch for flexible matching
-  const existingContact = contacts?.find((c: ContactRow) => phonesMatch(c.phone, phone))
-
-  if (existingContact) {
-    // Update name if it changed
-    if (name && name !== existingContact.name) {
-      await supabaseAdmin()
-        .from('contacts')
-        .update({ name, updated_at: new Date().toISOString() })
-        .eq('id', existingContact.id)
-    }
-    return { contact: existingContact, wasCreated: false }
-  }
-
-  // Create new contact
-  const { data: newContact, error: createError } = await supabaseAdmin()
-    .from('contacts')
-    .insert({
-      user_id: userId,
-      phone,
-      name: name || phone,
-    })
-    .select()
-    .single()
-
-  if (createError) {
-    console.error('Error creating contact:', createError)
-    return null
-  }
-
-  return { contact: newContact, wasCreated: true }
 }
 
 async function findOrCreateConversation(userId: string, contactId: string) {

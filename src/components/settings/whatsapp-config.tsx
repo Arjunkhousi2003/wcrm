@@ -598,7 +598,8 @@ export function WhatsAppConfig() {
                     <li>Click &quot;Edit&quot; on the Webhook section</li>
                     <li>Paste the <strong className="text-slate-200">Webhook Callback URL</strong> from above</li>
                     <li>Enter the same <strong className="text-slate-200">Verify Token</strong> you set here</li>
-                    <li>Subscribe to &quot;messages&quot; webhook field</li>
+                    <li>Subscribe to <strong className="text-slate-200">messages</strong> (required for customer replies in Inbox)</li>
+                    <li>Add your Meta <strong className="text-slate-200">App Secret</strong> as <code className="text-xs">META_APP_SECRET</code> in server env — without it, replies are rejected</li>
                   </ol>
                 </AccordionContent>
               </AccordionItem>

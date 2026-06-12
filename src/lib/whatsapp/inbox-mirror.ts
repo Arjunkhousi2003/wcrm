@@ -98,6 +98,8 @@ async function findOrCreateConversation(
     .select('id')
     .eq('user_id', userId)
     .eq('contact_id', contactId)
+    .order('created_at', { ascending: true })
+    .limit(1)
     .maybeSingle()
 
   if (findError) {
@@ -120,6 +122,8 @@ async function findOrCreateConversation(
       .select('id')
       .eq('user_id', userId)
       .eq('contact_id', contactId)
+      .order('created_at', { ascending: true })
+      .limit(1)
       .maybeSingle()
     if (retry) return retry.id
     console.error('[inbox-mirror] conversation create failed:', createError.message)

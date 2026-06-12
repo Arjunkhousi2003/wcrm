@@ -236,6 +236,13 @@ export function MessageThread({
     onMessagesLoadedRef.current = onMessagesLoaded;
   });
 
+  const onNewMessageRef = useRef(onNewMessage);
+  const onUpdateMessageRef = useRef(onUpdateMessage);
+  useEffect(() => {
+    onNewMessageRef.current = onNewMessage;
+    onUpdateMessageRef.current = onUpdateMessage;
+  });
+
   const conversationId = conversation?.id;
   const hasUnread = (conversation?.unread_count ?? 0) > 0;
 
@@ -277,6 +284,49 @@ export function MessageThread({
     // realtime is best-effort and any message events sent while the WS
     // was disconnected or throttled are otherwise lost.
   }, [conversationId, resyncToken]);
+
+  // Conversation-scoped message realtime — more reliable than the
+  // page-level channel for the open thread (filtered delivery, no
+  // cross-conversation noise). Catches customer replies that land
+  // while this thread is open even if the parent channel missed them.
+  useEffect(() => {
+    if (!conversationId) return;
+
+    const supabase = createClient();
+    const channel = supabase
+      .channel(`thread-messages:${conversationId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "messages",
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        (payload) => {
+          const msg = payload.new as Message;
+          onNewMessageRef.current(msg);
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "messages",
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        (payload) => {
+          const msg = payload.new as Message;
+          onUpdateMessageRef.current(msg.id, msg);
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [conversationId]);
 
   // Reactions fetch — pulls the current state from the DB. Kept separate
   // from the channel subscription below so a `resyncToken` bump just
