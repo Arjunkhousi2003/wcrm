@@ -117,10 +117,15 @@ export const RATE_LIMITS = {
   /** Individual message send. 60/min per user = one per second
    *  sustained, comfortable for a live human typing. */
   send: { limit: 60, windowMs: 60_000 },
-  /** Broadcast dispatch. 5/min per user — even a 1 000-recipient
-   *  broadcast is one call; this caps the rate at which a single user
-   *  can launch campaigns, not the messages inside one. */
-  broadcast: { limit: 5, windowMs: 60_000 },
+  /** Starting a new broadcast campaign (without an in-flight broadcast_id). */
+  broadcastStart: { limit: 5, windowMs: 60_000 },
+  /**
+   * Batch dispatch inside a campaign. The client POSTs once per ~10
+   * recipients, so this budget must be much larger than broadcastStart
+   * — the old single `broadcast: 5/min` cap silently stopped every
+   * campaign at 50 messages (5 batches × 10).
+   */
+  broadcastBatch: { limit: 2_000, windowMs: 3_600_000 },
   /** Reaction add/swap/remove. More permissive than send — users
    *  fidget with reactions and a single "swap" is actually two calls
    *  (remove + add) under the hood. */

@@ -66,22 +66,49 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Per-user broadcast budget. Note: this limits how often a user
-    // can *start* a campaign, not how many messages go out inside
-    // one — the fan-out loop below runs without additional gating.
-    const limit = checkRateLimit(`broadcast:${user.id}`, RATE_LIMITS.broadcast)
-    if (!limit.success) {
-      return rateLimitResponse(limit)
-    }
-
     const body = await request.json()
     const {
+      broadcast_id,
       recipients: newRecipients,
       phone_numbers,
       template_name,
       template_language,
       template_params,
     } = body
+
+    // In-flight campaigns send one API call per ~10 recipients. Rate-
+    // limit per campaign (generous) vs per-user campaign starts (strict).
+    if (broadcast_id) {
+      const { data: campaign, error: campaignError } = await supabase
+        .from('broadcasts')
+        .select('id')
+        .eq('id', broadcast_id)
+        .eq('user_id', user.id)
+        .maybeSingle()
+
+      if (campaignError || !campaign) {
+        return NextResponse.json(
+          { error: 'Broadcast not found' },
+          { status: 404 },
+        )
+      }
+
+      const batchLimit = checkRateLimit(
+        `broadcast:batch:${user.id}:${broadcast_id}`,
+        RATE_LIMITS.broadcastBatch,
+      )
+      if (!batchLimit.success) {
+        return rateLimitResponse(batchLimit)
+      }
+    } else {
+      const startLimit = checkRateLimit(
+        `broadcast:start:${user.id}`,
+        RATE_LIMITS.broadcastStart,
+      )
+      if (!startLimit.success) {
+        return rateLimitResponse(startLimit)
+      }
+    }
 
     // Normalize to a list of {phone, params} regardless of shape.
     let recipients: NewRecipient[]

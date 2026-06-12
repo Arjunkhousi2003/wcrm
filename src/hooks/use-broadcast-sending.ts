@@ -92,6 +92,42 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const BROADCAST_429_MAX_RETRIES = 5;
+
+/** POST a broadcast batch; retries on 429 using Retry-After from the API. */
+async function postBroadcastBatch(
+  body: Record<string, unknown>,
+): Promise<{ res: Response; data: Record<string, unknown> }> {
+  for (let attempt = 0; attempt <= BROADCAST_429_MAX_RETRIES; attempt++) {
+    const res = await fetch('/api/whatsapp/broadcast', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    const data = (await res.json().catch(() => ({}))) as Record<
+      string,
+      unknown
+    >;
+
+    if (res.status === 429 && attempt < BROADCAST_429_MAX_RETRIES) {
+      const retryHeader = res.headers.get('Retry-After');
+      const retrySec = Number(
+        data.retry_after_seconds ?? retryHeader ?? 5,
+      );
+      await sleep(Math.max(1, retrySec) * 1000);
+      continue;
+    }
+
+    return { res, data };
+  }
+
+  return {
+    res: new Response(null, { status: 429 }),
+    data: { error: 'Rate limit exceeded after retries' },
+  };
+}
+
 interface BroadcastApiResult {
   phone: string;
   status: 'sent' | 'failed';
@@ -531,20 +567,18 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
         if (apiRecipients.length === 0) continue;
 
         try {
-          const res = await fetch('/api/whatsapp/broadcast', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              recipients: apiRecipients,
-              template_name: payload.template.name,
-              template_language: payload.template.language ?? 'en_US',
-            }),
+          const { res, data } = await postBroadcastBatch({
+            broadcast_id: broadcast.id,
+            recipients: apiRecipients,
+            template_name: payload.template.name,
+            template_language: payload.template.language ?? 'en_US',
           });
 
-          const data = await res.json();
-
           if (!res.ok) {
-            throw new Error(data.error || 'Broadcast API request failed');
+            throw new Error(
+              (typeof data.error === 'string' && data.error) ||
+                'Broadcast API request failed',
+            );
           }
 
           const resultsByPhone = new Map<string, BroadcastApiResult>();

@@ -10,7 +10,8 @@ import { ConversationList } from "@/components/inbox/conversation-list";
 import { MessageThread } from "@/components/inbox/message-thread";
 import { ContactSidebar } from "@/components/inbox/contact-sidebar";
 import { toast } from "sonner";
-import { WifiOff } from "lucide-react";
+import { WifiOff, AlertTriangle } from "lucide-react";
+import Link from "next/link";
 import { cn } from "@/lib/utils";
 
 /** Poll interval when the inbox tab is open — safety net if realtime
@@ -36,6 +37,8 @@ export default function InboxPage() {
   const [whatsappConnected, setWhatsappConnected] = useState<boolean | null>(
     null
   );
+  /** False when META_APP_SECRET is missing — Meta webhooks are rejected. */
+  const [webhookReady, setWebhookReady] = useState<boolean | null>(null);
   /**
    * Bumped whenever we want children (ConversationList, MessageThread)
    * to refetch from the DB — used as a safety net against missed
@@ -141,9 +144,17 @@ export default function InboxPage() {
         const payload = await res.json();
         if (!cancelled) {
           setWhatsappConnected(!!payload.connected);
+          setWebhookReady(
+            typeof payload.webhook_ready === "boolean"
+              ? payload.webhook_ready
+              : null,
+          );
         }
       } catch {
-        if (!cancelled) setWhatsappConnected(false);
+        if (!cancelled) {
+          setWhatsappConnected(false);
+          setWebhookReady(null);
+        }
       }
     })();
 
@@ -530,6 +541,19 @@ export default function InboxPage() {
           <WifiOff className="h-4 w-4 text-amber-400" />
           <p className="text-xs text-amber-400">
             WhatsApp® is not connected. Go to Settings to connect your account.
+          </p>
+        </div>
+      )}
+      {whatsappConnected === true && webhookReady === false && (
+        <div className="flex shrink-0 items-center justify-center gap-2 border-b border-red-500/20 bg-red-500/10 px-4 py-2">
+          <AlertTriangle className="h-4 w-4 shrink-0 text-red-400" />
+          <p className="text-xs text-red-300">
+            Customer replies and delivery ticks will not work — set{" "}
+            <code className="text-red-200">META_APP_SECRET</code> on your server
+            and subscribe to the <strong>messages</strong> webhook in Meta.{" "}
+            <Link href="/settings" className="underline hover:text-red-100">
+              Open Settings
+            </Link>
           </p>
         </div>
       )}
