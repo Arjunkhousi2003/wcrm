@@ -52,6 +52,8 @@ interface BroadcastPayload {
   template: MessageTemplate;
   audience: AudienceConfig;
   variables: Record<string, VariableMapping>;
+  /** Public HTTPS URL for image / video / document template headers. */
+  headerMediaUrl?: string;
 }
 
 interface UseBroadcastSendingReturn {
@@ -567,12 +569,19 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
         if (apiRecipients.length === 0) continue;
 
         try {
-          const { res, data } = await postBroadcastBatch({
+          const batchBody: Record<string, unknown> = {
             broadcast_id: broadcast.id,
             recipients: apiRecipients,
             template_name: payload.template.name,
             template_language: payload.template.language ?? 'en_US',
-          });
+          };
+          if (payload.headerMediaUrl?.trim()) {
+            batchBody.header_media_url = payload.headerMediaUrl.trim();
+            if (payload.template.header_type) {
+              batchBody.header_media_type = payload.template.header_type;
+            }
+          }
+          const { res, data } = await postBroadcastBatch(batchBody);
 
           if (!res.ok) {
             throw new Error(

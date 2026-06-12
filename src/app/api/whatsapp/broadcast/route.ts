@@ -14,6 +14,11 @@ import {
   RATE_LIMITS,
 } from '@/lib/rate-limit'
 import { mirrorOutboundToInbox } from '@/lib/whatsapp/inbox-mirror'
+import {
+  isValidTemplateMediaUrl,
+  templateNeedsMediaHeader,
+  type TemplateHeaderMedia,
+} from '@/lib/whatsapp/template-utils'
 
 interface BroadcastResult {
   phone: string
@@ -74,6 +79,8 @@ export async function POST(request: Request) {
       template_name,
       template_language,
       template_params,
+      header_media_url,
+      header_media_type,
     } = body
 
     // In-flight campaigns send one API call per ~10 recipients. Rate-
@@ -139,6 +146,25 @@ export async function POST(request: Request) {
       )
     }
 
+    let headerMedia: TemplateHeaderMedia | undefined
+    if (header_media_type && templateNeedsMediaHeader(header_media_type)) {
+      if (
+        typeof header_media_url !== 'string' ||
+        !isValidTemplateMediaUrl(header_media_url)
+      ) {
+        return NextResponse.json(
+          {
+            error: `This template requires a public HTTPS ${header_media_type} URL in the header.`,
+          },
+          { status: 400 },
+        )
+      }
+      headerMedia = {
+        type: header_media_type,
+        url: header_media_url.trim(),
+      }
+    }
+
     const { data: config, error: configError } = await supabase
       .from('whatsapp_config')
       .select('*')
@@ -189,6 +215,7 @@ export async function POST(request: Request) {
             templateName: template_name,
             language: template_language || 'en_US',
             params: recipient.params ?? [],
+            headerMedia,
           })
           sentMessageId = result.messageId
           lastError = null

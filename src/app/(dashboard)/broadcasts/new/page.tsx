@@ -41,6 +41,7 @@ export default function NewBroadcastPage() {
   const [variables, setVariables] = useState<
     Record<string, { type: 'static' | 'field' | 'custom_field'; value: string }>
   >({});
+  const [headerMediaUrl, setHeaderMediaUrl] = useState('');
   const [name, setName] = useState('');
 
   async function handleSend() {
@@ -59,6 +60,7 @@ export default function NewBroadcastPage() {
           contactLimit: audience.contactLimit,
         },
         variables,
+        headerMediaUrl: headerMediaUrl.trim() || undefined,
       });
       router.push(`/broadcasts/${broadcastId}`);
     } catch (err) {
@@ -183,7 +185,11 @@ export default function NewBroadcastPage() {
           {currentStep === 0 && (
             <Step1ChooseTemplate
               selectedTemplate={template}
-              onSelect={setTemplate}
+              onSelect={(t) => {
+                setTemplate(t);
+                setHeaderMediaUrl('');
+                setVariables({});
+              }}
               onNext={() => setCurrentStep(1)}
               onBack={() => router.push('/broadcasts')}
             />
@@ -201,6 +207,8 @@ export default function NewBroadcastPage() {
               template={template}
               variables={variables}
               onUpdate={setVariables}
+              headerMediaUrl={headerMediaUrl}
+              onHeaderMediaUrlChange={setHeaderMediaUrl}
               onNext={() => setCurrentStep(3)}
               onBack={() => setCurrentStep(1)}
             />

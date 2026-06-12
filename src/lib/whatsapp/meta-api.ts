@@ -1,3 +1,6 @@
+import type { TemplateHeaderMedia } from '@/lib/whatsapp/template-utils'
+import { buildTemplateComponents } from '@/lib/whatsapp/template-utils'
+
 /**
  * Meta WhatsApp Cloud API helpers.
  *
@@ -119,7 +122,12 @@ export interface SendTemplateMessageArgs {
   to: string
   templateName: string
   language?: string
+  /** Body text variable values ({{1}}, {{2}}, …). */
   params?: string[]
+  /** Image / video / document header — required when the template uses a media header. */
+  headerMedia?: TemplateHeaderMedia
+  /** Text header variables when the template header contains {{n}} placeholders. */
+  headerTextParams?: string[]
   /** Meta's message_id of the message being replied to. */
   contextMessageId?: string
 }
@@ -138,6 +146,8 @@ export async function sendTemplateMessage(
     templateName,
     language = 'en_US',
     params,
+    headerMedia,
+    headerTextParams,
     contextMessageId,
   } = args
   const url = `${META_API_BASE}/${phoneNumberId}/messages`
@@ -147,13 +157,13 @@ export async function sendTemplateMessage(
     language: { code: language },
   }
 
-  if (params && params.length > 0) {
-    template.components = [
-      {
-        type: 'body',
-        parameters: params.map((p) => ({ type: 'text', text: String(p) })),
-      },
-    ]
+  const components = buildTemplateComponents({
+    bodyParams: params,
+    headerMedia,
+    headerTextParams,
+  })
+  if (components) {
+    template.components = components
   }
 
   const body: Record<string, unknown> = {

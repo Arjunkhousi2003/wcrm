@@ -12,7 +12,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { ArrowLeft, ArrowRight, Eye, Loader2 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Eye, ImageIcon, Loader2 } from 'lucide-react';
+import {
+  isValidTemplateMediaUrl,
+  templateNeedsMediaHeader,
+} from '@/lib/whatsapp/template-utils';
 
 type VariableType = 'static' | 'field' | 'custom_field';
 
@@ -25,6 +29,8 @@ interface Step3Props {
   template: MessageTemplate;
   variables: Record<string, VariableMapping>;
   onUpdate: (variables: Record<string, VariableMapping>) => void;
+  headerMediaUrl: string;
+  onHeaderMediaUrlChange: (url: string) => void;
   onNext: () => void;
   onBack: () => void;
 }
@@ -51,6 +57,8 @@ export function Step3Personalize({
   template,
   variables,
   onUpdate,
+  headerMediaUrl,
+  onHeaderMediaUrlChange,
   onNext,
   onBack,
 }: Step3Props) {
@@ -105,11 +113,17 @@ export function Step3Personalize({
     };
   }, []);
 
+  const needsMediaHeader = templateNeedsMediaHeader(template.header_type);
+
   const placeholders = useMemo(() => {
     const matches = template.body_text.match(/\{\{(\d+)\}\}/g);
     if (!matches) return [];
     return [...new Set(matches)].sort();
   }, [template.body_text]);
+
+  const mediaHeaderInvalid =
+    needsMediaHeader &&
+    (!headerMediaUrl.trim() || !isValidTemplateMediaUrl(headerMediaUrl));
 
   /**
    * A placeholder is "unmapped" if the user hasn't picked either a
@@ -193,12 +207,47 @@ export function Step3Personalize({
         </p>
       </div>
 
-      {placeholders.length === 0 ? (
-        <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-6 text-center">
-          <p className="text-sm text-slate-400">
-            This template has no variables to personalize.
+      {needsMediaHeader && (
+        <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <ImageIcon className="h-4 w-4 text-primary" />
+            <p className="text-sm font-medium text-white">
+              Header {template.header_type} URL
+            </p>
+          </div>
+          <p className="mb-3 text-xs text-slate-500">
+            Meta fetches this public HTTPS URL when sending. Use a direct link
+            to a .jpg / .png (not a page that requires login).
           </p>
+          <Input
+            value={headerMediaUrl}
+            onChange={(e) => onHeaderMediaUrlChange(e.target.value)}
+            placeholder="https://example.com/promo.jpg"
+            className="border-slate-700 bg-slate-800 text-white placeholder:text-slate-500"
+          />
+          {headerMediaUrl.trim() &&
+            isValidTemplateMediaUrl(headerMediaUrl) &&
+            template.header_type === 'image' && (
+            <div className="mt-3 overflow-hidden rounded-lg border border-slate-700 bg-slate-950">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={headerMediaUrl.trim()}
+                alt="Header preview"
+                className="max-h-40 w-full object-contain"
+              />
+            </div>
+          )}
         </div>
+      )}
+
+      {placeholders.length === 0 ? (
+        !needsMediaHeader && (
+          <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-6 text-center">
+            <p className="text-sm text-slate-400">
+              This template has no body variables to personalize.
+            </p>
+          </div>
+        )
       ) : (
         <div className="space-y-4">
           {placeholders.map((placeholder) => {
@@ -339,6 +388,13 @@ export function Step3Personalize({
         </div>
       )}
 
+      {mediaHeaderInvalid && (
+        <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+          Enter a valid public <strong>HTTPS</strong> URL for the template
+          header image. Meta must be able to download it from their servers.
+        </div>
+      )}
+
       <div className="flex items-center justify-between border-t border-slate-800 pt-4">
         <Button
           variant="outline"
@@ -350,7 +406,7 @@ export function Step3Personalize({
         </Button>
         <Button
           onClick={onNext}
-          disabled={unmappedKeys.length > 0}
+          disabled={unmappedKeys.length > 0 || mediaHeaderInvalid}
           className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
         >
           Next

@@ -112,6 +112,12 @@ export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack
                 </div>
                 <p className="line-clamp-3 text-xs text-slate-400">{template.body_text}</p>
                 <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                  {template.header_type && (
+                    <>
+                      <span className="capitalize">{template.header_type} header</span>
+                      <span>-</span>
+                    </>
+                  )}
                   <span>{template.language ?? 'en_US'}</span>
                   {template.status && (
                     <>

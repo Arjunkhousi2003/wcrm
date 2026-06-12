@@ -14,6 +14,11 @@ import {
   rateLimitResponse,
   RATE_LIMITS,
 } from '@/lib/rate-limit'
+import {
+  isValidTemplateMediaUrl,
+  templateNeedsMediaHeader,
+  type TemplateHeaderMedia,
+} from '@/lib/whatsapp/template-utils'
 
 export async function POST(request: Request) {
   try {
@@ -46,6 +51,8 @@ export async function POST(request: Request) {
       media_url,
       template_name,
       template_params,
+      template_language,
+      header_media_url,
       reply_to_message_id,
     } = body
 
@@ -169,6 +176,45 @@ export async function POST(request: Request) {
       }
     }
 
+    let templateLanguage = 'en_US'
+    let templateHeaderMedia: TemplateHeaderMedia | undefined
+
+    if (message_type === 'template') {
+      const { data: templateRow } = await supabase
+        .from('message_templates')
+        .select('header_type, language')
+        .eq('user_id', user.id)
+        .eq('name', template_name)
+        .maybeSingle()
+
+      templateLanguage =
+        (typeof template_language === 'string' && template_language) ||
+        templateRow?.language ||
+        'en_US'
+
+      const mediaUrl =
+        typeof header_media_url === 'string' && header_media_url.trim()
+          ? header_media_url.trim()
+          : typeof media_url === 'string' && media_url.trim()
+            ? media_url.trim()
+            : ''
+
+      if (templateNeedsMediaHeader(templateRow?.header_type)) {
+        if (!mediaUrl || !isValidTemplateMediaUrl(mediaUrl)) {
+          return NextResponse.json(
+            {
+              error: `Template "${template_name}" requires a public HTTPS ${templateRow.header_type} URL.`,
+            },
+            { status: 400 },
+          )
+        }
+        templateHeaderMedia = {
+          type: templateRow.header_type,
+          url: mediaUrl,
+        }
+      }
+    }
+
     // Send via Meta API — retry with phone-number variants if Meta rejects
     // with "recipient not in allowed list" (common in sandbox / when a
     // number was registered with/without a trunk 0). If an alternate
@@ -184,7 +230,9 @@ export async function POST(request: Request) {
           accessToken,
           to: phone,
           templateName: template_name,
+          language: templateLanguage,
           params: template_params || [],
+          headerMedia: templateHeaderMedia,
           contextMessageId,
         })
         return result.messageId

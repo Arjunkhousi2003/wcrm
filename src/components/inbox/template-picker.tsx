@@ -18,14 +18,27 @@ import { Badge } from "@/components/ui/badge";
 import {
   ArrowLeft,
   ChevronRight,
+  ImageIcon,
   LayoutTemplate,
   Loader2,
 } from "lucide-react";
+import {
+  isValidTemplateMediaUrl,
+  templateNeedsMediaHeader,
+} from "@/lib/whatsapp/template-utils";
+
+export interface TemplateSendOptions {
+  headerMediaUrl?: string;
+}
 
 interface TemplatePickerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSelect: (template: MessageTemplate, params: string[]) => void;
+  onSelect: (
+    template: MessageTemplate,
+    params: string[],
+    options?: TemplateSendOptions,
+  ) => void;
 }
 
 // Meta numbers template placeholders from 1 ({{1}}, {{2}}, …) and the
@@ -57,6 +70,7 @@ export function TemplatePicker({
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<MessageTemplate | null>(null);
   const [params, setParams] = useState<string[]>([]);
+  const [headerMediaUrl, setHeaderMediaUrl] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -106,30 +120,45 @@ export function TemplatePicker({
     if (!next) {
       setSelected(null);
       setParams([]);
+      setHeaderMediaUrl("");
     }
     onOpenChange(next);
   }
 
   function pickTemplate(template: MessageTemplate) {
     const vars = extractVariables(template.body_text);
-    if (vars.length === 0) {
+    const needsMedia = templateNeedsMediaHeader(template.header_type);
+    if (vars.length === 0 && !needsMedia) {
       onSelect(template, []);
       handleOpenChange(false);
       return;
     }
     setSelected(template);
     setParams(new Array(vars.length).fill(""));
+    setHeaderMediaUrl("");
   }
 
   function confirm() {
     if (!selected) return;
-    onSelect(selected, params);
+    const options =
+      templateNeedsMediaHeader(selected.header_type) && headerMediaUrl.trim()
+        ? { headerMediaUrl: headerMediaUrl.trim() }
+        : undefined;
+    onSelect(selected, params, options);
     handleOpenChange(false);
   }
 
   const variables = selected ? extractVariables(selected.body_text) : [];
+  const needsMediaHeader = selected
+    ? templateNeedsMediaHeader(selected.header_type)
+    : false;
+  const mediaHeaderValid =
+    !needsMediaHeader ||
+    (headerMediaUrl.trim().length > 0 &&
+      isValidTemplateMediaUrl(headerMediaUrl));
   const canConfirm =
     !!selected &&
+    mediaHeaderValid &&
     variables.every((_, i) => (params[i] ?? "").trim().length > 0);
 
   return (
@@ -178,6 +207,11 @@ export function TemplatePicker({
                         <Badge className="border border-primary/30 bg-primary/20 text-[10px] text-primary">
                           {t.category}
                         </Badge>
+                        {t.header_type && (
+                          <Badge className="border border-slate-600 bg-slate-800 text-[10px] text-slate-400">
+                            {t.header_type} header
+                          </Badge>
+                        )}
                         {t.language && (
                           <span className="text-[10px] uppercase text-slate-500">
                             {t.language}
@@ -207,6 +241,20 @@ export function TemplatePicker({
                 </p>
               )}
             </div>
+            {needsMediaHeader && (
+              <div className="space-y-1">
+                <Label className="flex items-center gap-1.5 text-xs text-slate-300">
+                  <ImageIcon className="h-3.5 w-3.5" />
+                  Header {selected.header_type} URL (HTTPS)
+                </Label>
+                <Input
+                  value={headerMediaUrl}
+                  onChange={(e) => setHeaderMediaUrl(e.target.value)}
+                  placeholder="https://example.com/image.jpg"
+                  className="border-slate-700 bg-slate-800 text-white placeholder:text-slate-500"
+                />
+              </div>
+            )}
             {variables.map((v, i) => (
               <div key={v} className="space-y-1">
                 <Label className="text-xs text-slate-300">{`Variable {{${v}}}`}</Label>
