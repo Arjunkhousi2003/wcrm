@@ -13,6 +13,7 @@ import {
   rateLimitResponse,
   RATE_LIMITS,
 } from '@/lib/rate-limit'
+import { mirrorOutboundToInbox } from '@/lib/whatsapp/inbox-mirror'
 
 interface BroadcastResult {
   phone: string
@@ -46,6 +47,10 @@ interface BroadcastResult {
 interface NewRecipient {
   phone: string
   params?: string[]
+  /** When set, the sent template is mirrored into the inbox thread. */
+  contact_id?: string
+  /** Rendered template body for inbox display (with {{n}} substituted). */
+  content_text?: string
 }
 
 export async function POST(request: Request) {
@@ -180,6 +185,24 @@ export async function POST(request: Request) {
           whatsapp_message_id: sentMessageId,
         })
         sentCount++
+
+        if (recipient.contact_id) {
+          try {
+            await mirrorOutboundToInbox(supabase, {
+              userId: user.id,
+              contactId: recipient.contact_id,
+              contentType: 'template',
+              contentText: recipient.content_text ?? null,
+              templateName: template_name,
+              whatsappMessageId: sentMessageId,
+            })
+          } catch (mirrorErr) {
+            console.error(
+              `[broadcast] inbox mirror failed for ${recipient.phone}:`,
+              mirrorErr instanceof Error ? mirrorErr.message : mirrorErr,
+            )
+          }
+        }
       } else {
         console.error(
           `Failed to send broadcast to ${recipient.phone}:`,

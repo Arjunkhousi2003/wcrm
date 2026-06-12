@@ -6,6 +6,7 @@ import { normalizePhone, phonesMatch } from '@/lib/whatsapp/phone-utils'
 import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
+import { mirrorOutboundToInbox } from '@/lib/whatsapp/inbox-mirror'
 
 // Lazy-initialized to avoid build-time crash when env vars are missing
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -413,6 +414,90 @@ async function flagBroadcastReplyIfAny(userId: string, contactId: string) {
   }
 }
 
+type BroadcastMirrorRecipient = {
+  whatsapp_message_id: string
+  sent_at: string | null
+  broadcasts: { user_id: string; template_name: string }
+}
+
+/**
+ * If this contact received a broadcast that was never mirrored into the
+ * inbox (older sends, or a mirror failure), backfill the outbound template
+ * row when they reply so the thread reads top-to-bottom like a chat.
+ */
+async function ensureBroadcastMirroredToInbox(
+  userId: string,
+  contactId: string,
+  contextWamid?: string,
+) {
+  try {
+    let recs: BroadcastMirrorRecipient[] | null = null
+    let fetchError: { message: string } | null = null
+
+    if (contextWamid) {
+      const result = await supabaseAdmin()
+        .from('broadcast_recipients')
+        .select(
+          'whatsapp_message_id, sent_at, broadcasts!inner(user_id, template_name)',
+        )
+        .eq('contact_id', contactId)
+        .eq('broadcasts.user_id', userId)
+        .eq('whatsapp_message_id', contextWamid)
+        .limit(1)
+      recs = (result.data ?? null) as BroadcastMirrorRecipient[] | null
+      fetchError = result.error
+    }
+
+    if (!recs?.length) {
+      const result = await supabaseAdmin()
+        .from('broadcast_recipients')
+        .select(
+          'whatsapp_message_id, sent_at, broadcasts!inner(user_id, template_name)',
+        )
+        .eq('contact_id', contactId)
+        .eq('broadcasts.user_id', userId)
+        .not('whatsapp_message_id', 'is', null)
+        .order('created_at', { ascending: false })
+        .limit(1)
+      recs = (result.data ?? null) as BroadcastMirrorRecipient[] | null
+      fetchError = result.error
+    }
+
+    if (fetchError || !recs?.length) return
+
+    const row = recs[0]
+    const wamid = row.whatsapp_message_id
+    const templateName = row.broadcasts.template_name
+
+    const { data: existing } = await supabaseAdmin()
+      .from('messages')
+      .select('id')
+      .eq('message_id', wamid)
+      .maybeSingle()
+
+    if (existing) return
+
+    const { data: tmpl } = await supabaseAdmin()
+      .from('message_templates')
+      .select('body_text')
+      .eq('user_id', userId)
+      .eq('name', templateName)
+      .maybeSingle()
+
+    await mirrorOutboundToInbox(supabaseAdmin(), {
+      userId,
+      contactId,
+      contentType: 'template',
+      contentText: tmpl?.body_text ?? templateName,
+      templateName,
+      whatsappMessageId: wamid,
+      createdAt: row.sent_at ?? undefined,
+    })
+  } catch (err) {
+    console.error('ensureBroadcastMirroredToInbox failed:', err)
+  }
+}
+
 /**
  * Resolve a Meta-side message_id into the matching internal UUID, scoped
  * to one conversation. Returns null when we never received the parent
@@ -530,6 +615,14 @@ async function processMessage(
   // Parse message content based on type
   const { contentText, mediaUrl, mediaType, interactiveReplyId } =
     await parseMessageContent(message, accessToken)
+
+  // Backfill the outbound broadcast into the thread before we resolve
+  // swipe-reply context — context.id is the broadcast's Meta wamid.
+  await ensureBroadcastMirroredToInbox(
+    userId,
+    contactRecord.id,
+    message.context?.id,
+  )
 
   // Resolve swipe-reply context if present. A missing parent is fine —
   // we just store NULL and the UI renders the message without a quote.

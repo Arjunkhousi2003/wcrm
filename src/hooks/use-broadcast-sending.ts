@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { renderTemplateBody } from '@/lib/whatsapp/template-utils';
 import { Contact, MessageTemplate } from '@/types';
 
 export type CustomFieldOperator = 'is' | 'is_not' | 'contains';
@@ -508,16 +509,24 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
 
         const apiRecipients = batch
           .filter((r) => r.contact?.phone)
-          .map((r) => ({
-            phone: r.contact!.phone as string,
-            params: r.contact
+          .map((r) => {
+            const params = r.contact
               ? resolveVariables(
                   payload.variables,
                   r.contact,
                   customValueIndex.get(r.contact.id),
                 )
-              : [],
-          }));
+              : [];
+            return {
+              phone: r.contact!.phone as string,
+              params,
+              contact_id: r.contact!.id,
+              content_text: renderTemplateBody(
+                payload.template.body_text,
+                params,
+              ),
+            };
+          });
 
         if (apiRecipients.length === 0) continue;
 
