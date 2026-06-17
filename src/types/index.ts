@@ -155,6 +155,17 @@ export interface MessageTemplate {
   created_at: string;
 }
 
+export interface UserMessage {
+  id: string;
+  user_id?: string | null;
+  full_name: string;
+  email: string;
+  phone?: string | null;
+  subject: string;
+  message: string;
+  created_at: string;
+}
+
 export interface Pipeline {
   id: string;
   user_id: string;

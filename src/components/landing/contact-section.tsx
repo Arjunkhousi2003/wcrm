@@ -7,10 +7,55 @@ import { FadeIn, StaggerChildren, StaggerItem } from "./animated";
 
 export function ContactSection() {
   const [submitted, setSubmitted] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [form, setForm] = useState({
+    fullName: "",
+    email: "",
+    phone: "",
+    subject: "",
+    message: "",
+  });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSubmitted(true);
+
+    if (sending) return;
+    setError(null);
+    setSending(true);
+
+    try {
+      const response = await fetch("/api/user-messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          full_name: form.fullName,
+          email: form.email,
+          phone: form.phone,
+          subject: form.subject,
+          message: form.message,
+        }),
+      });
+
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error ?? "Failed to send message");
+      }
+
+      setSubmitted(true);
+      setForm({
+        fullName: "",
+        email: "",
+        phone: "",
+        subject: "",
+        message: "",
+      });
+    } catch (err) {
+      console.error("Failed to submit contact message:", err);
+      setError(err instanceof Error ? err.message : "Failed to send message");
+    } finally {
+      setSending(false);
+    }
   };
 
   return (
@@ -145,6 +190,11 @@ export function ContactSection() {
                 </div>
               ) : (
                 <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+                  {error ? (
+                    <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                      {error}
+                    </div>
+                  ) : null}
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div>
                       <label className="text-sm font-medium text-slate-700">
@@ -153,7 +203,12 @@ export function ContactSection() {
                       <input
                         required
                         type="text"
+                        value={form.fullName}
+                        onChange={(e) =>
+                          setForm((prev) => ({ ...prev, fullName: e.target.value }))
+                        }
                         placeholder="John Doe"
+                        disabled={sending}
                         className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
                       />
                     </div>
@@ -164,7 +219,12 @@ export function ContactSection() {
                       <input
                         required
                         type="email"
+                        value={form.email}
+                        onChange={(e) =>
+                          setForm((prev) => ({ ...prev, email: e.target.value }))
+                        }
                         placeholder="john@example.com"
+                        disabled={sending}
                         className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
                       />
                     </div>
@@ -173,7 +233,12 @@ export function ContactSection() {
                     <label className="text-sm font-medium text-slate-700">Phone Number</label>
                     <input
                       type="tel"
+                      value={form.phone}
+                      onChange={(e) =>
+                        setForm((prev) => ({ ...prev, phone: e.target.value }))
+                      }
                       placeholder={COMPANY.phone}
+                      disabled={sending}
                       className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
                     />
                   </div>
@@ -184,7 +249,12 @@ export function ContactSection() {
                     <input
                       required
                       type="text"
+                      value={form.subject}
+                      onChange={(e) =>
+                        setForm((prev) => ({ ...prev, subject: e.target.value }))
+                      }
                       placeholder="How can we help?"
+                      disabled={sending}
                       className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
                     />
                   </div>
@@ -195,15 +265,21 @@ export function ContactSection() {
                     <textarea
                       required
                       rows={4}
+                      value={form.message}
+                      onChange={(e) =>
+                        setForm((prev) => ({ ...prev, message: e.target.value }))
+                      }
                       placeholder="Tell us more about your needs..."
+                      disabled={sending}
                       className="mt-1.5 w-full resize-none rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
                     />
                   </div>
                   <button
                     type="submit"
+                    disabled={sending}
                     className="w-full rounded-lg bg-slate-900 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
                   >
-                    Send Message
+                    {sending ? "Sending..." : "Send Message"}
                   </button>
                 </form>
               )}

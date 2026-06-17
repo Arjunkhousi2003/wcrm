@@ -15,6 +15,7 @@ import {
   Zap,
   Workflow,
   Settings,
+  Send,
   LogOut,
   User,
   X,
@@ -55,6 +56,7 @@ const navItems: NavItem[] = [
 
 const bottomNavItems = [
   { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/user-messages", label: "User Messages", icon: Send },
 ];
 
 interface SidebarProps {
