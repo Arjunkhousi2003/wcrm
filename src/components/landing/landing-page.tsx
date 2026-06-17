@@ -5,7 +5,6 @@ import { HeroSection } from "./hero-section";
 import { ChallengeSection } from "./challenge-section";
 import { SolutionsSection } from "./solutions-section";
 import { PricingSection } from "./pricing-section";
-import { DemoCtaSection } from "./demo-cta-section";
 import { ContactSection } from "./contact-section";
 import { FinalCtaSection } from "./final-cta-section";
 import { Footer } from "./footer";
@@ -21,7 +20,6 @@ export function LandingPage() {
           <SolutionsSection />
         </div>
         <PricingSection />
-        <DemoCtaSection />
         <ContactSection />
         <FinalCtaSection />
       </main>

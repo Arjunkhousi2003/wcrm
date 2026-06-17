@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Briefcase, Clock, Globe, Mail, MapPin, Phone, Share2 } from "lucide-react";
+import { COMPANY } from "@/lib/company";
 import { FadeIn, StaggerChildren, StaggerItem } from "./animated";
 
 export function ContactSection() {
@@ -52,7 +53,9 @@ export function ContactSection() {
                     <div>
                       <p className="font-semibold text-slate-900">Address</p>
                       <p className="mt-1 text-sm text-slate-600">
-                        Indrapuri, Bhopal, Madhya Pradesh, India
+                        {COMPANY.legalName}
+                        <br />
+                        {COMPANY.address.full}
                       </p>
                     </div>
                   </div>
@@ -62,7 +65,12 @@ export function ContactSection() {
                     </div>
                     <div>
                       <p className="font-semibold text-slate-900">Email</p>
-                      <p className="mt-1 text-sm text-slate-600">info@techdigisoftware.com</p>
+                      <a
+                        href={`mailto:${COMPANY.email}`}
+                        className="mt-1 block text-sm text-slate-600 hover:text-blue-600"
+                      >
+                        {COMPANY.email}
+                      </a>
                     </div>
                   </div>
                   <div className="flex gap-4 rounded-xl border border-slate-200 p-4">
@@ -71,7 +79,13 @@ export function ContactSection() {
                     </div>
                     <div>
                       <p className="font-semibold text-slate-900">Phone</p>
-                      <p className="mt-1 text-sm text-slate-600">+91 98765 43210</p>
+                      <a
+                        href={`tel:${COMPANY.phone.replace(/\s/g, "")}`}
+                        className="mt-1 block text-sm text-slate-600 hover:text-blue-600"
+                      >
+                        {COMPANY.phone}
+                      </a>
+                      <p className="mt-1 text-xs text-slate-500">Mon–Fri, 9am–5pm</p>
                     </div>
                   </div>
                 </div>
@@ -85,9 +99,9 @@ export function ContactSection() {
                   <h4 className="font-semibold text-slate-900">Business Hours</h4>
                 </div>
                 <ul className="mt-4 space-y-2 text-sm text-slate-600">
-                  <li>Monday – Friday: 9:00 AM – 6:00 PM</li>
-                  <li>Saturday: 10:00 AM – 4:00 PM</li>
-                  <li>Sunday: Closed</li>
+                  <li>{COMPANY.hours.weekdays}</li>
+                  <li>{COMPANY.hours.saturday}</li>
+                  <li>{COMPANY.hours.sunday}</li>
                 </ul>
               </div>
             </StaggerItem>
@@ -159,7 +173,7 @@ export function ContactSection() {
                     <label className="text-sm font-medium text-slate-700">Phone Number</label>
                     <input
                       type="tel"
-                      placeholder="+91 98765 43210"
+                      placeholder={COMPANY.phone}
                       className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
                     />
                   </div>
@@ -202,10 +216,11 @@ export function ContactSection() {
           <div className="mt-6 overflow-hidden rounded-2xl border border-slate-200 shadow-sm">
             <iframe
               title="TechDigi office location"
-              src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3667.5!2d77.4!3d23.25!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x0%3A0x0!2zMjPCsDE1JzAwLjAiTiA3N8KwMjQnMDAuMCJF!5e0!3m2!1sen!2sin!4v1"
+              src={COMPANY.mapEmbedUrl}
               className="h-64 w-full border-0 sm:h-80"
               loading="lazy"
               referrerPolicy="no-referrer-when-downgrade"
+              allowFullScreen
             />
           </div>
         </FadeIn>
