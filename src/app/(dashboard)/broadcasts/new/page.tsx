@@ -106,6 +106,10 @@ export default function NewBroadcastPage() {
         type: audience.type,
         tagIds: audience.tagIds,
       },
+      header_media_url: headerMediaUrl.trim() || null,
+      header_media_type: headerMediaUrl.trim()
+        ? template.header_type ?? null
+        : null,
       status: 'draft',
       total_recipients: 0,
       sent_count: 0,

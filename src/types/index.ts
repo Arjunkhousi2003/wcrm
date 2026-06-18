@@ -228,6 +228,9 @@ export interface Broadcast {
   read_count: number;
   replied_count: number;
   failed_count: number;
+  /** Public HTTPS URL for image / video / document template headers. */
+  header_media_url?: string;
+  header_media_type?: string;
   created_at: string;
 }
 
@@ -254,6 +257,17 @@ export interface BroadcastRecipient {
   whatsapp_message_id?: string;
   created_at: string;
   contact?: Contact;
+}
+
+export interface MarketingMedia {
+  id: string;
+  user_id: string;
+  file_name: string;
+  storage_path: string;
+  public_url: string;
+  mime_type: string;
+  size_bytes?: number;
+  created_at: string;
 }
 
 // ============================================================

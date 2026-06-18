@@ -26,6 +26,7 @@ import {
   isValidTemplateMediaUrl,
   templateNeedsMediaHeader,
 } from "@/lib/whatsapp/template-utils";
+import { MarketingImageUpload } from "@/components/broadcasts/marketing-image-upload";
 
 export interface TemplateSendOptions {
   headerMediaUrl?: string;
@@ -245,13 +246,12 @@ export function TemplatePicker({
               <div className="space-y-1">
                 <Label className="flex items-center gap-1.5 text-xs text-slate-300">
                   <ImageIcon className="h-3.5 w-3.5" />
-                  Header {selected.header_type} URL (HTTPS)
+                  Header {selected.header_type}
                 </Label>
-                <Input
+                <MarketingImageUpload
                   value={headerMediaUrl}
-                  onChange={(e) => setHeaderMediaUrl(e.target.value)}
-                  placeholder="https://example.com/image.jpg"
-                  className="border-slate-700 bg-slate-800 text-white placeholder:text-slate-500"
+                  onChange={setHeaderMediaUrl}
+                  headerType={selected.header_type}
                 />
               </div>
             )}

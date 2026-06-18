@@ -461,6 +461,10 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
             customField: payload.audience.customField,
             excludeTagIds: payload.audience.excludeTagIds,
           },
+          header_media_url: payload.headerMediaUrl?.trim() || null,
+          header_media_type: payload.headerMediaUrl?.trim()
+            ? payload.template.header_type ?? null
+            : null,
           status: 'sending',
           total_recipients: contacts.length,
           sent_count: 0,

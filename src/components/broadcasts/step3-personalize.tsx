@@ -17,6 +17,7 @@ import {
   isValidTemplateMediaUrl,
   templateNeedsMediaHeader,
 } from '@/lib/whatsapp/template-utils';
+import { MarketingImageUpload } from '@/components/broadcasts/marketing-image-upload';
 
 type VariableType = 'static' | 'field' | 'custom_field';
 
@@ -216,27 +217,14 @@ export function Step3Personalize({
             </p>
           </div>
           <p className="mb-3 text-xs text-slate-500">
-            Meta fetches this public HTTPS URL when sending. Use a direct link
-            to a .jpg / .png (not a page that requires login).
+            Upload an image — it is stored on the server and the public URL is
+            saved for this broadcast. Meta fetches that URL when sending.
           </p>
-          <Input
+          <MarketingImageUpload
             value={headerMediaUrl}
-            onChange={(e) => onHeaderMediaUrlChange(e.target.value)}
-            placeholder="https://example.com/promo.jpg"
-            className="border-slate-700 bg-slate-800 text-white placeholder:text-slate-500"
+            onChange={onHeaderMediaUrlChange}
+            headerType={template.header_type}
           />
-          {headerMediaUrl.trim() &&
-            isValidTemplateMediaUrl(headerMediaUrl) &&
-            template.header_type === 'image' && (
-            <div className="mt-3 overflow-hidden rounded-lg border border-slate-700 bg-slate-950">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={headerMediaUrl.trim()}
-                alt="Header preview"
-                className="max-h-40 w-full object-contain"
-              />
-            </div>
-          )}
         </div>
       )}
 
