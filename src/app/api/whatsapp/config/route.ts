@@ -98,7 +98,7 @@ export async function GET() {
       })
       const siteUrl =
         process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '') ||
-        'https://wacrm.tech'
+        'https://techdigicrm.in'
       return NextResponse.json({
         connected: true,
         phone_info: phoneInfo,

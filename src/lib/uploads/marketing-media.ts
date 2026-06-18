@@ -32,7 +32,7 @@ export function getMarketingPublicBaseUrl(): string {
   const configured = process.env.MARKETING_UPLOAD_PUBLIC_URL?.trim()
   if (configured) return configured.replace(/\/$/, '')
   const site =
-    process.env.NEXT_PUBLIC_SITE_URL?.trim() || 'https://wacrm.tech'
+    process.env.NEXT_PUBLIC_SITE_URL?.trim() || 'https://techdigicrm.in'
   return `${site.replace(/\/$/, '')}/api/uploads/marketing-image`
 }
 
